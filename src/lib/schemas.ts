@@ -160,9 +160,19 @@ export const UPLOAD_SLOTS = ['entities', 'ownership', 'filings'] as const;
 export type UploadSlot = (typeof UPLOAD_SLOTS)[number];
 
 export const UPLOAD_FILE_NAMES: Record<UploadSlot, string> = {
-  entities: 'entities.csv',
-  ownership: 'ownership.csv',
-  filings: 'filings.csv',
+  entities: 'Entities',
+  ownership: 'Ownership',
+  filings: 'Filings',
+};
+
+/** The backend groups validation errors under these fixed logical dataset
+ * names (see coverpin-backend's SLOT_SCHEMAS) regardless of what the user
+ * actually named their file — this maps back to the upload slot so the UI
+ * can show the real filename instead. */
+export const UPLOAD_SLOT_BY_FILE: Record<string, UploadSlot> = {
+  'entities.csv': 'entities',
+  'ownership.csv': 'ownership',
+  'filings.csv': 'filings',
 };
 
 export interface UploadFieldError {

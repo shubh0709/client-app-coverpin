@@ -12,7 +12,14 @@ import {
   UploadIcon,
 } from 'lucide-react';
 import { api, ApiError, UploadValidationError } from '@/lib/api';
-import { UPLOAD_FILE_NAMES, uploadFormSchema, type UploadFieldError, type UploadSlot, type UploadSuccess } from '@/lib/schemas';
+import {
+  UPLOAD_FILE_NAMES,
+  UPLOAD_SLOT_BY_FILE,
+  uploadFormSchema,
+  type UploadFieldError,
+  type UploadSlot,
+  type UploadSuccess,
+} from '@/lib/schemas';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -181,31 +188,40 @@ export default function UploadPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
-            {groupedErrors.map(([file, errors]) => (
-              <div key={file}>
-                <h3 className="mb-2 text-sm font-semibold">{file}</h3>
-                <div className="overflow-hidden rounded-lg border">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                      <tr>
-                        <th className="w-16 px-2 py-1.5 font-medium">Line</th>
-                        <th className="w-40 px-2 py-1.5 font-medium">Column</th>
-                        <th className="px-2 py-1.5 font-medium">Message</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {errors.map((err, i) => (
-                        <tr key={`${err.line}-${err.column}-${i}`} className="border-t">
-                          <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{err.line}</td>
-                          <td className="px-2 py-1.5 text-muted-foreground">{err.column}</td>
-                          <td className="px-2 py-1.5">{err.message}</td>
+            {groupedErrors.map(([file, errors]) => {
+              const slot = UPLOAD_SLOT_BY_FILE[file];
+              const uploadedName = slot ? files[slot]?.name : undefined;
+              return (
+                <div key={file}>
+                  <h3 className="mb-2 text-sm font-semibold">
+                    {slot ? UPLOAD_FILE_NAMES[slot] : file}
+                    {uploadedName && (
+                      <span className="font-normal text-muted-foreground"> — {uploadedName}</span>
+                    )}
+                  </h3>
+                  <div className="overflow-hidden rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+                        <tr>
+                          <th className="w-16 px-2 py-1.5 font-medium">Line</th>
+                          <th className="w-40 px-2 py-1.5 font-medium">Column</th>
+                          <th className="px-2 py-1.5 font-medium">Message</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {errors.map((err, i) => (
+                          <tr key={`${err.line}-${err.column}-${i}`} className="border-t">
+                            <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{err.line}</td>
+                            <td className="px-2 py-1.5 text-muted-foreground">{err.column}</td>
+                            <td className="px-2 py-1.5">{err.message}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       )}

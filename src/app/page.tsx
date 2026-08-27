@@ -199,7 +199,7 @@ export default function ListPage() {
         <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed p-10 text-center">
           <p className="text-sm font-medium">No entities yet</p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            Upload entities.csv, ownership.csv, and filings.csv to populate the registry.
+            Upload your entities, ownership, and filings data (.csv or .xlsx) to populate the registry.
           </p>
           <Button asChild>
             <Link href="/upload">
