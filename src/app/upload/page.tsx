@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type DragEvent, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CheckCircle2Icon,
@@ -43,6 +44,7 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function UploadPage() {
+  const queryClient = useQueryClient();
   const [files, setFiles] = useState<Files>({});
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<UploadSlot, string>>>({});
   // Bumped per-slot to force the underlying <input type="file"> to remount —
@@ -88,6 +90,7 @@ export default function UploadPage() {
         next[slot] = issue.message;
       }
       setFieldErrors(next);
+      toast.warning('Select all required files before uploading');
       return;
     }
 
@@ -96,6 +99,14 @@ export default function UploadPage() {
       const result = await api.upload(parsed.data);
       setSuccess(result);
       setFiles({});
+      // A successful upload upserts new rows — every cached list/analytics/
+      // jurisdiction/suggestion query is now stale, so drop them all rather
+      // than let the list or analytics page show pre-upload data until its
+      // filters happen to change.
+      queryClient.invalidateQueries({ queryKey: ['jurisdictions'] });
+      queryClient.invalidateQueries({ queryKey: ['entities'] });
+      queryClient.invalidateQueries({ queryKey: ['suggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['analytics'] });
       setInputKeys((prev) => ({
         entities: prev.entities + 1,
         ownership: prev.ownership + 1,

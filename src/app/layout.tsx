@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { NavLinks } from "@/components/nav-links";
 import { HelpContact } from "@/components/help-contact";
+import { QueryProvider } from "@/components/query-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,19 +29,21 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <header className="border-b">
-          <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-            <Link href="/" className="font-heading text-lg font-semibold">
-              Entity Registry
-            </Link>
-            <div className="flex items-center gap-2">
-              <NavLinks />
-              <HelpContact />
+        <QueryProvider>
+          <header className="border-b">
+            <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+              <Link href="/" className="font-heading text-lg font-semibold">
+                Entity Registry
+              </Link>
+              <div className="flex items-center gap-2">
+                <NavLinks />
+                <HelpContact />
+              </div>
             </div>
-          </div>
-        </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">{children}</main>
-        <Toaster />
+          </header>
+          <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">{children}</main>
+          <Toaster />
+        </QueryProvider>
       </body>
     </html>
   );

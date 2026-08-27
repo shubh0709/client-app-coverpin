@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { api, ApiError } from '@/lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { ApiError } from '@/lib/api';
+import { useAnalytics, useJurisdictions } from '@/lib/queries';
 import { ENTITY_STATUSES } from '@/lib/schemas';
-import type { AnalyticsResponse, EntityStatus } from '@/lib/schemas';
+import type { AnalyticsFilters, EntityStatus } from '@/lib/schemas';
 import {
   ENTITY_STATUS_COLOR,
   RELATION_COLORS,
@@ -28,64 +30,53 @@ export default function AnalyticsPage() {
   const [jurisdiction, setJurisdiction] = useState<string>(ALL);
   const [entityStatus, setEntityStatus] = useState<EntityStatus | typeof ALL>(ALL);
   const [parentEntityId, setParentEntityId] = useState<string | null>(null);
-
-  const [jurisdictionOptions, setJurisdictionOptions] = useState<string[]>([]);
-  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [hasAnyData, setHasAnyData] = useState<boolean | null>(null);
   const autoSelectedParent = useRef(false);
 
   // Jurisdiction options come from a dedicated endpoint (not a page of
-  // `listEntities`, which is paginated) — its non-emptiness also tells us
-  // whether "empty" means "nothing uploaded yet" or "the current filter
+  // `listEntities`, which is paginated) — shared with the list page's query,
+  // so it's only ever fetched once per session. Its non-emptiness also tells
+  // us whether "empty" means "nothing uploaded yet" or "the current filter
   // excludes everything", which are required to be distinct, explicit empty
   // states, never the same blank chart.
-  useEffect(() => {
-    const controller = new AbortController();
-    api
-      .getJurisdictions(controller.signal)
-      .then((res) => {
-        setJurisdictionOptions(res.jurisdictions);
-        setHasAnyData(res.jurisdictions.length > 0);
-      })
-      .catch(() => {
-        // Non-fatal (including an abort on unmount) — page filters just
-        // won't have jurisdiction options yet.
-      });
-    return () => controller.abort();
-  }, []);
+  const jurisdictionsQuery = useJurisdictions();
+  const jurisdictionOptions = jurisdictionsQuery.data?.jurisdictions ?? [];
+  const hasAnyData = jurisdictionsQuery.data ? jurisdictionsQuery.data.jurisdictions.length > 0 : null;
 
-  // No explicit "loading" boolean — see the same note on the list page.
-  // State is only ever set inside the promise callbacks below. An
-  // AbortController (not just a `cancelled` flag) so a superseded request
-  // is actually cancelled on the wire, not just ignored once it lands.
+  const filters: AnalyticsFilters = useMemo(
+    () => ({
+      jurisdiction: jurisdiction === ALL ? undefined : jurisdiction,
+      entityStatus: entityStatus === ALL ? undefined : entityStatus,
+      parentEntityId: parentEntityId ?? undefined,
+    }),
+    [jurisdiction, entityStatus, parentEntityId],
+  );
+  const analyticsQuery = useAnalytics(filters);
+  const analytics = analyticsQuery.data ?? null;
+
+  // Sync the parent dropdown to the backend's default pick once, so the
+  // ownership chart isn't blank on first load.
   useEffect(() => {
-    const controller = new AbortController();
-    api
-      .getAnalytics(
-        {
-          jurisdiction: jurisdiction === ALL ? undefined : jurisdiction,
-          entityStatus: entityStatus === ALL ? undefined : entityStatus,
-          parentEntityId: parentEntityId ?? undefined,
-        },
-        controller.signal,
-      )
-      .then((res) => {
-        setAnalytics(res);
-        setError(null);
-        // Sync the parent dropdown to the backend's default pick once, so the
-        // ownership chart isn't blank on first load.
-        if (!autoSelectedParent.current && parentEntityId === null && res.ownershipByParent.selectedParentId) {
-          autoSelectedParent.current = true;
-          setParentEntityId(res.ownershipByParent.selectedParentId);
-        }
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        setError(err instanceof ApiError ? err.message : 'Failed to load analytics.');
-      });
-    return () => controller.abort();
-  }, [jurisdiction, entityStatus, parentEntityId]);
+    if (
+      !autoSelectedParent.current &&
+      parentEntityId === null &&
+      analyticsQuery.data?.ownershipByParent.selectedParentId
+    ) {
+      autoSelectedParent.current = true;
+      setParentEntityId(analyticsQuery.data.ownershipByParent.selectedParentId);
+    }
+  }, [analyticsQuery.data, parentEntityId]);
+
+  useEffect(() => {
+    if (analyticsQuery.error) {
+      const message = analyticsQuery.error instanceof ApiError ? analyticsQuery.error.message : 'Failed to load analytics.';
+      toast.error(message);
+    }
+  }, [analyticsQuery.error]);
+  const error = analyticsQuery.error
+    ? analyticsQuery.error instanceof ApiError
+      ? analyticsQuery.error.message
+      : 'Failed to load analytics.'
+    : null;
 
   const complianceData = analytics?.complianceBreakdown ?? [];
   const complianceTotal = complianceData.reduce((sum, d) => sum + d.count, 0);

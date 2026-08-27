@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import { SearchIcon, UploadIcon, XIcon } from 'lucide-react';
+import { toast } from 'sonner';
 import { api, ApiError } from '@/lib/api';
+import { queryKeys, useEntities, useJurisdictions, useSuggestions } from '@/lib/queries';
 import { COMPLIANCE_STATUSES, ENTITY_STATUSES } from '@/lib/schemas';
 import type {
   ComplianceStatus,
-  EntityListResponse,
+  EntityListFilters,
   EntityStatus,
   EntitySuggestion,
   PageSize,
-  TopLevelEntity,
 } from '@/lib/schemas';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -28,8 +30,15 @@ import { ApiErrorNotice } from '@/components/api-error-notice';
 
 const ALL = '__all__';
 const DEFAULT_PAGE_SIZE: PageSize = 10;
+// Stable references so an undefined query result doesn't produce a fresh
+// `[]` on every render — that would otherwise defeat the `filterBar` useMemo
+// below, which lists these among its dependencies.
+const EMPTY_JURISDICTIONS: string[] = [];
+const EMPTY_SUGGESTIONS: EntitySuggestion[] = [];
 
 export default function ListPage() {
+  const queryClient = useQueryClient();
+
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [entityStatus, setEntityStatus] = useState<EntityStatus | typeof ALL>(ALL);
@@ -38,13 +47,19 @@ export default function ListPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
-  const [jurisdictionOptions, setJurisdictionOptions] = useState<string[]>([]);
-  const [entities, setEntities] = useState<TopLevelEntity[] | null>(null);
-  const [meta, setMeta] = useState({ page: 1, pageSize: DEFAULT_PAGE_SIZE as number, total: 0, totalPages: 1 });
-  const [error, setError] = useState<string | null>(null);
   const [everHadData, setEverHadData] = useState(false);
 
-  const [suggestions, setSuggestions] = useState<EntitySuggestion[]>([]);
+  // A separate, shorter-debounced query backs the autocomplete dropdown — it
+  // needs to feel responsive as-you-type, independent of the (slower) main
+  // list refetch below.
+  const [suggestQuery, setSuggestQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setSuggestQuery(search.trim()), 150);
+    return () => clearTimeout(t);
+  }, [search]);
+  const suggestionsQuery = useSuggestions(suggestQuery);
+  const suggestions = suggestionsQuery.data?.suggestions ?? EMPTY_SUGGESTIONS;
+
   const [showSuggestions, setShowSuggestions] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
 
@@ -52,30 +67,6 @@ export default function ListPage() {
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
-  }, [search]);
-
-  // A shorter-debounced, separate fetch backs the autocomplete dropdown —
-  // it needs to feel responsive as-you-type, independent of the (slower)
-  // main list refetch above. An empty query just skips fetching; the
-  // dropdown's own render guard (search.trim() !== '') is what hides any
-  // stale suggestions, so there's nothing to clear here synchronously.
-  useEffect(() => {
-    const q = search.trim();
-    if (!q) return;
-    const controller = new AbortController();
-    const t = setTimeout(() => {
-      api
-        .getSuggestions(q, controller.signal)
-        .then((res) => setSuggestions(res.suggestions))
-        .catch((err: unknown) => {
-          if (err instanceof DOMException && err.name === 'AbortError') return;
-          setSuggestions([]);
-        });
-    }, 150);
-    return () => {
-      clearTimeout(t);
-      controller.abort();
-    };
   }, [search]);
 
   // Closing the dropdown on an outside click (rather than onBlur) means a
@@ -97,40 +88,29 @@ export default function ListPage() {
   function selectSuggestion(entityName: string) {
     setSearch(entityName);
     setDebouncedSearch(entityName);
-    setSuggestions([]);
+    setSuggestQuery('');
     setShowSuggestions(false);
   }
 
   const clearSearch = useCallback(() => {
     setSearch('');
     setDebouncedSearch('');
-    setSuggestions([]);
+    setSuggestQuery('');
     setShowSuggestions(false);
   }, []);
 
   // Build the jurisdiction filter's option list from a dedicated endpoint
   // (not from a page of `listEntities`, which is now paginated and would
-  // only reflect the jurisdictions on that one page).
-  useEffect(() => {
-    const controller = new AbortController();
-    api
-      .getJurisdictions(controller.signal)
-      .then((res) => {
-        setJurisdictionOptions(res.jurisdictions);
-        setEverHadData(res.jurisdictions.length > 0);
-      })
-      .catch(() => {
-        // Non-fatal (including an abort on unmount) — the main fetch below
-        // surfaces the real error state.
-      });
-    return () => controller.abort();
-  }, []);
+  // only reflect the jurisdictions on that one page). Cached and shared with
+  // the analytics page — navigating between them no longer refetches it.
+  const jurisdictionsQuery = useJurisdictions();
+  const jurisdictionOptions = jurisdictionsQuery.data?.jurisdictions ?? EMPTY_JURISDICTIONS;
 
   // Any filter change (other than page itself) should snap back to page 1 —
   // the previous page number is almost certainly meaningless for a new
   // filter set. Adjusted during render (React's documented pattern for
-  // deriving state from a prop/state change) so the fetch effect below only
-  // ever sees the already-reset page, never fires a request for a stale one.
+  // deriving state from a prop/state change) so the fetch below only ever
+  // sees the already-reset page, never fires a request for a stale one.
   const filtersKey = JSON.stringify([debouncedSearch, entityStatus, complianceStatus, jurisdiction, pageSize]);
   const [prevFiltersKey, setPrevFiltersKey] = useState(filtersKey);
   if (filtersKey !== prevFiltersKey) {
@@ -138,80 +118,63 @@ export default function ListPage() {
     if (page !== 1) setPage(1);
   }
 
-  // A small in-memory cache of in-flight/completed requests, keyed by the
-  // exact filters+page+pageSize that produced them. This is what makes
-  // pagination feel instant: after a page loads, the next page is fetched
-  // in the background and dropped in here, so clicking "next" just resolves
-  // an already-settled (or already in-flight) promise instead of waiting on
-  // a fresh round trip.
-  type CacheEntry = { promise: Promise<EntityListResponse>; controller: AbortController };
-  const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
+  const entityFilters: EntityListFilters = useMemo(
+    () => ({
+      search: debouncedSearch || undefined,
+      entityStatus: entityStatus === ALL ? undefined : entityStatus,
+      complianceStatus: complianceStatus === ALL ? undefined : complianceStatus,
+      jurisdiction: jurisdiction === ALL ? undefined : jurisdiction,
+      page,
+      pageSize,
+    }),
+    [debouncedSearch, entityStatus, complianceStatus, jurisdiction, page, pageSize],
+  );
 
-  function cacheKey(p: number) {
-    return `${filtersKey}|${p}`;
-  }
+  // Cached per exact filters+page+pageSize, and held on screen (via
+  // `placeholderData: keepPreviousData` inside useEntities) while a refetch
+  // is in flight — `isPending` alone distinguishes the very first load.
+  const entitiesQuery = useEntities(entityFilters);
+  const entities = entitiesQuery.data?.data ?? null;
+  const meta = entitiesQuery.data
+    ? {
+        page: entitiesQuery.data.page,
+        pageSize: entitiesQuery.data.pageSize,
+        total: entitiesQuery.data.total,
+        totalPages: entitiesQuery.data.totalPages,
+      }
+    : { page: 1, pageSize, total: 0, totalPages: 1 };
 
-  /** Returns the cache entry for page `p`, creating it (with its own
-   * AbortController) on a miss. `fresh` tells the caller whether *this call*
-   * is the one that created it — only the creator may abort it. A cache hit
-   * (e.g. a page the background prefetch already started) must never be
-   * aborted by some other consumer's cleanup; it's shared, and letting it
-   * finish in the background is the entire point of prefetching it. */
-  function getOrCreate(p: number): { entry: CacheEntry; fresh: boolean } {
-    const key = cacheKey(p);
-    const existing = cacheRef.current.get(key);
-    if (existing) return { entry: existing, fresh: false };
-    const controller = new AbortController();
-    const promise = api.listEntities(
-      {
-        search: debouncedSearch || undefined,
-        entityStatus: entityStatus === ALL ? undefined : entityStatus,
-        complianceStatus: complianceStatus === ALL ? undefined : complianceStatus,
-        jurisdiction: jurisdiction === ALL ? undefined : jurisdiction,
-        page: p,
-        pageSize,
-      },
-      controller.signal,
-    );
-    const entry: CacheEntry = { promise, controller };
-    cacheRef.current.set(key, entry);
-    // A failed or aborted fetch never held valid data — don't leave it
-    // cached, or a later visit to this page would replay the same rejection.
-    promise.catch(() => cacheRef.current.delete(key));
-    return { entry, fresh: true };
-  }
+  // Sticky "has any data ever loaded" flag — once either signal goes
+  // positive it stays true, distinguishing "nothing uploaded yet" from "this
+  // filter matches nothing". Derived during render (React's documented
+  // pattern for adjusting state from a change, same as `prevFiltersKey`
+  // above) rather than in an effect, since it only ever needs to flip one
+  // way and the guard prevents any render loop.
+  const hasDataNow = (jurisdictionsQuery.data?.jurisdictions.length ?? 0) > 0 || (entitiesQuery.data?.total ?? 0) > 0;
+  if (hasDataNow && !everHadData) setEverHadData(true);
 
-  // No explicit "loading" boolean: the previous render is held on screen
-  // while a refetch is in flight (see dataviz skill's "refetch keeps the
-  // frame" rule) — `entities === null` alone distinguishes the very first
-  // load. State is only ever set from inside the promise callbacks, never
-  // synchronously in the effect body, so a stale filter change can't stomp a
-  // newer one's result.
+  const error =
+    entitiesQuery.error instanceof ApiError ? entitiesQuery.error.message : entitiesQuery.error ? 'Failed to load entities.' : null;
   useEffect(() => {
-    const { entry, fresh } = getOrCreate(page);
-    entry.promise
-      .then((res) => {
-        setEntities(res.data);
-        setMeta({ page: res.page, pageSize: res.pageSize, total: res.total, totalPages: res.totalPages });
-        setError(null);
-        if (res.total > 0) setEverHadData(true);
-        // Prefetch the next page in the background so it's ready by the
-        // time the user clicks "next" — never awaited, never blocks render,
-        // and never tied to this effect's cleanup (see getOrCreate above).
-        if (res.page < res.totalPages) getOrCreate(res.page + 1).entry.promise.catch(() => {});
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        setError(err instanceof ApiError ? err.message : 'Failed to load entities.');
-        setEntities(null);
-      });
-    // Only abort a request this exact effect run created — a cache hit (a
-    // page the prefetch already kicked off) is shared and must keep running.
-    return () => {
-      if (fresh) entry.controller.abort();
-    };
+    if (entitiesQuery.error) {
+      const message = entitiesQuery.error instanceof ApiError ? entitiesQuery.error.message : 'Failed to load entities.';
+      toast.error(message);
+    }
+  }, [entitiesQuery.error]);
+
+  // Prefetch the next page in the background so it's ready by the time the
+  // user clicks "next" — dropped straight into the query cache under its own
+  // key, so clicking "next" just reads an already-settled cache entry.
+  useEffect(() => {
+    const data = entitiesQuery.data;
+    if (!data || data.page >= data.totalPages) return;
+    const nextFilters: EntityListFilters = { ...entityFilters, page: data.page + 1 };
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.entities(nextFilters),
+      queryFn: ({ signal }) => api.listEntities(nextFilters, signal),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersKey, page]);
+  }, [entitiesQuery.data]);
 
   const filtersActive =
     debouncedSearch !== '' || entityStatus !== ALL || complianceStatus !== ALL || jurisdiction !== ALL;
@@ -403,3 +366,4 @@ export default function ListPage() {
     </div>
   );
 }
+
