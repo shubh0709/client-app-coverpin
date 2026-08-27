@@ -1,9 +1,11 @@
-# CoverPin Compliance Console (client-app)
+# Entity Registry (client-app)
 
-Frontend for a compliance entities/filings console — interview-prep scaffolding built
-alongside a companion [coverpin-backend](../coverpin-backend) NestJS API. Lets you register
-compliance entities, track their filings through a lifecycle (PENDING → AI_PROCESSING → FILED
-→ CONFIRMED), and generate an AI (ChatGPT) compliance checklist per entity.
+Frontend for the Entity Registry — a compliance-tracking registry built alongside a companion
+[coverpin-backend](../coverpin-backend) NestJS API. Upload `entities.csv` / `ownership.csv` /
+`filings.csv` in one batch, browse the resulting entity hierarchy (top-level entities expanded
+into their foreign qualifications and subsidiaries, each with an independently computed
+compliance status), and review portfolio-wide analytics. See
+`../entity-registry-requirements-analysis.md` in the repo root for the full domain brief.
 
 ## Tech stack
 
@@ -11,10 +13,12 @@ compliance entities, track their filings through a lifecycle (PENDING → AI_PRO
 - **Tailwind CSS v4**
 - **shadcn/ui** on the **Radix UI** primitives (`radix-nova` style) — button, input, select,
   dialog, table, card, badge, etc.
-- **React Hook Form** + **Zod** for form state and validation, with schemas in
-  [`src/lib/schemas.ts`](src/lib/schemas.ts) deliberately mirroring the backend's DTOs so
-  invalid input is caught client-side before it ever hits the API
+- **Zod** for the upload form's client-side file-selection checks, with domain types/enums in
+  [`src/lib/schemas.ts`](src/lib/schemas.ts) mirroring the backend's API contract
 - **sonner** for toast notifications
+- Charts are hand-built (plain SVG/CSS, no charting library) against the palette and mark specs
+  in this repo's `dataviz` skill — see [`src/lib/chart-colors.ts`](src/lib/chart-colors.ts) for
+  the validated color assignment.
 
 ### Architecture note: client-side SPA pattern, not server components
 
@@ -40,20 +44,24 @@ npm run dev
 ```
 
 Visit `http://localhost:3000`. You should see the seeded entities from the backend's
-`npm run seed` on the dashboard.
+`npm run seed` on the list page.
 
 ## Pages
 
-- `/` — dashboard: table of all entities with status badges and filing counts
-- `/entities/new` — register a new entity (name, type, jurisdiction, formation date, agent)
-- `/entities/[id]` — entity detail: info card, "Generate checklist" (calls the backend's
-  ChatGPT-backed endpoint and renders the validated, structured result), and a filings table
-  where each row only shows the button(s) for its valid next lifecycle state (mirrors the
-  backend's forward-only state machine in `src/lib/schemas.ts`'s `FILING_TRANSITIONS`)
+- `/` — list page: searchable/filterable top-level entities, each expandable (one level deep)
+  into its FQs and subsidiaries; FQ vs. subsidiary rows are visually distinguished via
+  `RelationChip`, and every row (top-level and child alike) shows its own independently computed
+  compliance status
+- `/upload` — three-file upload (entities/ownership/filings, `.csv` or `.xlsx`); on success shows
+  row counts, on the backend's 422 response renders every validation error grouped by file and
+  sorted by line
+- `/analytics` — page-level jurisdiction/entity-status filters above four charts: compliance
+  status breakdown, entity status by region, subsidiary/FQ counts per top-level entity, and
+  ownership % for a selected parent (with the unallocated remainder as its own segment)
 
-All three were smoke-tested end-to-end with a headless browser against a live backend
-(create entity → add filing → transition it → attempt the AI checklist without an API key
-configured, which fails gracefully via a toast instead of crashing the page).
+Built and typechecked against `NEXT_PUBLIC_API_URL` pointing at a backend that isn't running yet
+— every page's loading/empty/error states were verified to render without crashing against an
+unreachable API (see `npx tsc --noEmit`, `npm run build`, `npm run lint`, all clean).
 
 ## Deployment (Vercel)
 

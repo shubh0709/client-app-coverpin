@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
+import { NavLinks } from "@/components/nav-links";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CoverPin Compliance Console",
-  description: "Compliance entities, filings, and AI-assisted checklists.",
+  title: "Entity Registry",
+  description: "Compliance-tracking registry for entities, foreign qualifications, and subsidiaries.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -29,9 +30,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <header className="border-b">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
             <Link href="/" className="font-heading text-lg font-semibold">
-              CoverPin Compliance Console
+              Entity Registry
             </Link>
-            <span className="text-sm text-muted-foreground">Entities &amp; Filings</span>
+            <NavLinks />
           </div>
         </header>
         <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">{children}</main>

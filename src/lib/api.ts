@@ -1,98 +1,106 @@
 import type {
-  ComplianceEntity,
-  CreateEntityInput,
-  CreateFilingInput,
-  Filing,
-  FilingStatus,
+  AnalyticsFilters,
+  AnalyticsResponse,
+  ApiErrorBody,
+  EntityListFilters,
+  EntityListResponse,
+  UploadFieldError,
+  UploadFormInput,
+  UploadSuccess,
 } from './schemas';
+import { UPLOAD_FILE_NAMES } from './schemas';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
-/** Shape produced by the backend's global HttpExceptionFilter. */
-interface ApiErrorBody {
-  statusCode: number;
-  message: string | string[];
-  path?: string;
-  timestamp?: string;
-}
-
+/** Generic API failure — anything that isn't the 422 upload-validation shape. */
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public path?: string,
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** The 422 upload-validation shape: every row/column error in one batch. */
+export class UploadValidationError extends Error {
+  constructor(public errors: UploadFieldError[]) {
+    super(`Upload failed validation with ${errors.length} error(s)`);
+    this.name = 'UploadValidationError';
+  }
+}
+
+async function parseErrorBody(res: Response): Promise<ApiErrorBody | null> {
+  try {
+    return (await res.json()) as ApiErrorBody;
+  } catch {
+    return null;
+  }
+}
+
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, {
-      ...init,
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
-    });
+    res = await fetch(`${API_URL}${path}`, init);
   } catch {
     throw new ApiError(0, 'Could not reach the API. Is the backend running?');
   }
 
   if (!res.ok) {
-    let message = `Request failed with status ${res.status}`;
-    try {
-      const body = (await res.json()) as ApiErrorBody;
-      message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
-    } catch {
-      // response wasn't JSON; fall back to the generic message above
+    const body = await parseErrorBody(res);
+    if (res.status === 422 && body?.errors) {
+      throw new UploadValidationError(body.errors);
     }
-    throw new ApiError(res.status, message);
+    const message = body?.message ?? `Request failed with status ${res.status}`;
+    throw new ApiError(res.status, message, body?.path);
   }
 
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
-export const api = {
-  health: () => request<{ status: string }>('/api/health'),
-
-  listEntities: () => request<ComplianceEntity[]>('/api/entities'),
-
-  getEntity: (id: string) => request<ComplianceEntity>(`/api/entities/${id}`),
-
-  createEntity: (input: CreateEntityInput) =>
-    request<ComplianceEntity>('/api/entities', {
-      method: 'POST',
-      body: JSON.stringify(cleanPayload(input)),
-    }),
-
-  deleteEntity: (id: string) =>
-    request<void>(`/api/entities/${id}`, { method: 'DELETE' }),
-
-  createFiling: (entityId: string, input: CreateFilingInput) =>
-    request<Filing>(`/api/entities/${entityId}/filings`, {
-      method: 'POST',
-      body: JSON.stringify(cleanPayload(input)),
-    }),
-
-  transitionFiling: (entityId: string, filingId: string, status: FilingStatus) =>
-    request<Filing>(`/api/entities/${entityId}/filings/${filingId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    }),
-
-  generateComplianceChecklist: (entityId: string) =>
-    request<ComplianceEntity>(`/api/entities/${entityId}/compliance-checklist`, {
-      method: 'POST',
-    }),
-};
-
-/** Drops empty-string optional fields so the backend doesn't see "" for optional DTO fields. */
-function cleanPayload<T extends Record<string, unknown>>(input: T): Partial<T> {
-  const out: Partial<T> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== '' && value !== undefined) {
-      out[key as keyof T] = value as T[keyof T];
-    }
+function buildQuery(params: Record<string, string | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, value);
   }
-  return out;
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
 }
+
+export const api = {
+  /** POST /api/upload — multipart/form-data with the three CSV/XLSX slots. */
+  upload: (files: UploadFormInput) => {
+    const form = new FormData();
+    for (const slot of Object.keys(UPLOAD_FILE_NAMES) as (keyof UploadFormInput)[]) {
+      form.append(slot, files[slot]);
+    }
+    return requestJson<UploadSuccess>('/api/upload', {
+      method: 'POST',
+      body: form,
+    });
+  },
+
+  /** GET /api/entities — the list page's top-level + one-level-deep children. */
+  listEntities: (filters: EntityListFilters = {}) =>
+    requestJson<EntityListResponse>(
+      `/api/entities${buildQuery({
+        search: filters.search,
+        entityStatus: filters.entityStatus,
+        complianceStatus: filters.complianceStatus,
+        jurisdiction: filters.jurisdiction,
+      })}`,
+    ),
+
+  /** GET /api/analytics — the four analytics-page charts. */
+  getAnalytics: (filters: AnalyticsFilters = {}) =>
+    requestJson<AnalyticsResponse>(
+      `/api/analytics${buildQuery({
+        jurisdiction: filters.jurisdiction,
+        entityStatus: filters.entityStatus,
+        parentEntityId: filters.parentEntityId,
+      })}`,
+    ),
+};
