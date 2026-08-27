@@ -59,6 +59,9 @@ Visit `http://localhost:3000`. You should see the seeded entities from the backe
   status breakdown, entity status by region, subsidiary/FQ counts per top-level entity, and
   ownership % for a selected parent (with the unallocated remainder as its own segment)
 
+Per-page internals (state, effects, request/response flow) with Mermaid flow diagrams:
+see [`docs/routes/`](docs/routes/README.md).
+
 Built and typechecked against `NEXT_PUBLIC_API_URL` pointing at a backend that isn't running yet
 — every page's loading/empty/error states were verified to render without crashing against an
 unreachable API (see `npx tsc --noEmit`, `npm run build`, `npm run lint`, all clean).
