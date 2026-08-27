@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { NavLinks } from "@/components/nav-links";
+import { HelpContact } from "@/components/help-contact";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,7 +33,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <Link href="/" className="font-heading text-lg font-semibold">
               Entity Registry
             </Link>
-            <NavLinks />
+            <div className="flex items-center gap-2">
+              <NavLinks />
+              <HelpContact />
+            </div>
           </div>
         </header>
         <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">{children}</main>

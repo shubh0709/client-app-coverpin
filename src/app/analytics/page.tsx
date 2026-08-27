@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ApiErrorNotice } from '@/components/api-error-notice';
 import { ChartCard } from '@/components/charts/chart-card';
 import { ComplianceBreakdownChart } from '@/components/charts/compliance-breakdown-chart';
 import { HorizontalBarChart, type BarGroup, type BarSeries } from '@/components/charts/horizontal-bar-chart';
@@ -172,12 +173,7 @@ export default function AnalyticsPage() {
         </Select>
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          {error} Make sure the backend is running at{' '}
-          <code>{process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}</code>.
-        </div>
-      )}
+      {error && <ApiErrorNotice message={error} />}
 
       {!error && analytics === null && (
         <p className="text-sm text-muted-foreground">Loading analytics…</p>

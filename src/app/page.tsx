@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { SearchIcon, UploadIcon, XIcon } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
@@ -9,6 +9,7 @@ import type {
   ComplianceStatus,
   EntityListResponse,
   EntityStatus,
+  EntitySuggestion,
   PageSize,
   TopLevelEntity,
 } from '@/lib/schemas';
@@ -23,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { EntityTable } from '@/components/entity-table';
 import { EntityPagination } from '@/components/entity-pagination';
+import { ApiErrorNotice } from '@/components/api-error-notice';
 
 const ALL = '__all__';
 const DEFAULT_PAGE_SIZE: PageSize = 10;
@@ -42,11 +44,69 @@ export default function ListPage() {
   const [error, setError] = useState<string | null>(null);
   const [everHadData, setEverHadData] = useState(false);
 
+  const [suggestions, setSuggestions] = useState<EntitySuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+
   // Debounce the search box so we don't fire a request per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  // A shorter-debounced, separate fetch backs the autocomplete dropdown —
+  // it needs to feel responsive as-you-type, independent of the (slower)
+  // main list refetch above. An empty query just skips fetching; the
+  // dropdown's own render guard (search.trim() !== '') is what hides any
+  // stale suggestions, so there's nothing to clear here synchronously.
+  useEffect(() => {
+    const q = search.trim();
+    if (!q) return;
+    const controller = new AbortController();
+    const t = setTimeout(() => {
+      api
+        .getSuggestions(q, controller.signal)
+        .then((res) => setSuggestions(res.suggestions))
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          setSuggestions([]);
+        });
+    }, 150);
+    return () => {
+      clearTimeout(t);
+      controller.abort();
+    };
+  }, [search]);
+
+  // Closing the dropdown on an outside click (rather than onBlur) means a
+  // click on a suggestion button still fires its own onClick before this
+  // sees the click — onBlur would close the list first and swallow it.
+  useEffect(() => {
+    function handlePointerDown(e: MouseEvent) {
+      if (!searchBoxRef.current?.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
+
+  /** Selecting a suggestion re-searches by its exact Entity Name — skipping
+   * the debounce so it feels like a direct jump — which guarantees an exact
+   * match and therefore the row highlight/auto-expand the user is after. */
+  function selectSuggestion(entityName: string) {
+    setSearch(entityName);
+    setDebouncedSearch(entityName);
+    setSuggestions([]);
+    setShowSuggestions(false);
+  }
+
+  const clearSearch = useCallback(() => {
+    setSearch('');
+    setDebouncedSearch('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+  }, []);
 
   // Build the jurisdiction filter's option list from a dedicated endpoint
   // (not from a page of `listEntities`, which is now paginated and would
@@ -156,26 +216,57 @@ export default function ListPage() {
   const filtersActive =
     debouncedSearch !== '' || entityStatus !== ALL || complianceStatus !== ALL || jurisdiction !== ALL;
 
-  function clearFilters() {
-    setSearch('');
-    setDebouncedSearch('');
+  const clearFilters = useCallback(() => {
+    clearSearch();
     setEntityStatus(ALL);
     setComplianceStatus(ALL);
     setJurisdiction(ALL);
-  }
+  }, [clearSearch]);
 
   const filterBar = useMemo(
     () => (
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-full max-w-xs">
+        <div ref={searchBoxRef} className="relative w-full max-w-xs">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onFocus={() => setShowSuggestions(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setShowSuggestions(false);
+            }}
             placeholder="Search entity name…"
-            className="pl-8"
+            className="pl-8 pr-7"
             aria-label="Search entity name"
+            autoComplete="off"
           />
+          {search && (
+            <button
+              type="button"
+              onClick={clearSearch}
+              aria-label="Clear search"
+              className="absolute top-1/2 right-1.5 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          )}
+          {showSuggestions && search.trim() !== '' && suggestions.length > 0 && (
+            <div className="absolute top-full z-20 mt-1 w-full overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10">
+              {suggestions.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => selectSuggestion(s.entityName)}
+                  className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                >
+                  <span className="font-medium">{s.entityName}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {s.jurisdiction} · {s.registrationType}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <Select
           value={entityStatus}
@@ -229,7 +320,18 @@ export default function ListPage() {
         )}
       </div>
     ),
-    [search, entityStatus, complianceStatus, jurisdiction, jurisdictionOptions, filtersActive],
+    [
+      search,
+      entityStatus,
+      complianceStatus,
+      jurisdiction,
+      jurisdictionOptions,
+      filtersActive,
+      suggestions,
+      showSuggestions,
+      clearSearch,
+      clearFilters,
+    ],
   );
 
   return (
@@ -250,12 +352,7 @@ export default function ListPage() {
 
       {filterBar}
 
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          {error} Make sure the backend is running at{' '}
-          <code>{process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}</code>.
-        </div>
-      )}
+      {error && <ApiErrorNotice message={error} />}
 
       {!error && entities === null && (
         <p className="text-sm text-muted-foreground">Loading entities…</p>

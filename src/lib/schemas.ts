@@ -80,8 +80,9 @@ export interface ChildEntity {
   children: ChildEntity[];
   /** Whether this row's own entityName matched the active search term
    * (false when no search is active). Used to auto-expand the path down to
-   * a matching descendant — the match itself is decided by the database,
-   * not by re-testing the string client-side. */
+   * a matching descendant — the match itself (substring or fuzzy/typo-
+   * tolerant) is decided by the backend, not by re-testing the string
+   * client-side. */
   matchesSearch: boolean;
 }
 
@@ -123,6 +124,21 @@ export interface EntityListFilters {
 
 export interface JurisdictionsResponse {
   jurisdictions: string[];
+}
+
+/** A single search-bar autocomplete suggestion — ranked by the backend's
+ * typo-tolerant match (exact substring hits first, then closest edit
+ * distance). Selecting one is meant to re-search by its exact `entityName`. */
+export interface EntitySuggestion {
+  id: string;
+  entityName: string;
+  registrationType: RegistrationType;
+  jurisdiction: string;
+  entityType: EntityType;
+}
+
+export interface SuggestionsResponse {
+  suggestions: EntitySuggestion[];
 }
 
 /** Analytics response shapes (GET /api/analytics). */

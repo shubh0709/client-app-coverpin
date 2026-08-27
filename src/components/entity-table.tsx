@@ -29,7 +29,10 @@ function escapeRegExp(value: string): string {
 /** Wraps every case-insensitive occurrence of `term` inside `text` in a
  * <mark>. Only ever called for a node the backend already flagged as
  * `matchesSearch` — this re-finds *where* the match is for rendering, it
- * doesn't decide *whether* one exists (the database already did). */
+ * doesn't decide *whether* one exists (the backend already did, and may have
+ * matched via a fuzzy/typo-tolerant comparison rather than a literal
+ * substring — in that case there's nothing to highlight and the name just
+ * renders plain). */
 function HighlightedName({ text, term }: { text: string; term: string }) {
   const trimmed = term.trim();
   if (!trimmed) return <>{text}</>;
@@ -54,7 +57,7 @@ function HighlightedName({ text, term }: { text: string; term: string }) {
 }
 
 /** True if this node, or any descendant at any depth, matched the active
- * search term — `matchesSearch` itself comes straight from the database, so
+ * search term — `matchesSearch` itself comes straight from the backend, so
  * this is just walking the already-fetched tree, not re-testing strings. */
 function subtreeHasMatch(node: EntityNode): boolean {
   return node.matchesSearch || node.children.some(subtreeHasMatch);

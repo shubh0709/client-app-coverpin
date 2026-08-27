@@ -23,6 +23,7 @@ import {
   type UploadSlot,
   type UploadSuccess,
 } from '@/lib/schemas';
+import { ApiErrorNotice } from '@/components/api-error-notice';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -167,11 +168,7 @@ export default function UploadPage() {
         </CardContent>
       </Card>
 
-      {genericError && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          {genericError}
-        </div>
-      )}
+      {genericError && <ApiErrorNotice message={genericError} />}
 
       {success && (
         <Card>
