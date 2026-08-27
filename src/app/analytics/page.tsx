@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
-import { collectJurisdictions, ENTITY_STATUSES } from '@/lib/schemas';
+import { ENTITY_STATUSES } from '@/lib/schemas';
 import type { AnalyticsResponse, EntityStatus } from '@/lib/schemas';
 import {
   ENTITY_STATUS_COLOR,
@@ -34,35 +34,42 @@ export default function AnalyticsPage() {
   const [hasAnyData, setHasAnyData] = useState<boolean | null>(null);
   const autoSelectedParent = useRef(false);
 
-  // An unfiltered fetch tells us whether "empty" means "nothing uploaded
-  // yet" or "the current filter excludes everything" — the two are required
-  // to be distinct, explicit empty states, never the same blank chart.
+  // Jurisdiction options come from a dedicated endpoint (not a page of
+  // `listEntities`, which is paginated) — its non-emptiness also tells us
+  // whether "empty" means "nothing uploaded yet" or "the current filter
+  // excludes everything", which are required to be distinct, explicit empty
+  // states, never the same blank chart.
   useEffect(() => {
+    const controller = new AbortController();
     api
-      .listEntities()
+      .getJurisdictions(controller.signal)
       .then((res) => {
-        const set = new Set<string>();
-        collectJurisdictions(res.data, set);
-        setJurisdictionOptions([...set].sort());
-        setHasAnyData(res.data.length > 0);
+        setJurisdictionOptions(res.jurisdictions);
+        setHasAnyData(res.jurisdictions.length > 0);
       })
       .catch(() => {
-        // Non-fatal — page filters just won't have jurisdiction options yet.
+        // Non-fatal (including an abort on unmount) — page filters just
+        // won't have jurisdiction options yet.
       });
+    return () => controller.abort();
   }, []);
 
   // No explicit "loading" boolean — see the same note on the list page.
-  // State is only ever set inside the promise callbacks below.
+  // State is only ever set inside the promise callbacks below. An
+  // AbortController (not just a `cancelled` flag) so a superseded request
+  // is actually cancelled on the wire, not just ignored once it lands.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     api
-      .getAnalytics({
-        jurisdiction: jurisdiction === ALL ? undefined : jurisdiction,
-        entityStatus: entityStatus === ALL ? undefined : entityStatus,
-        parentEntityId: parentEntityId ?? undefined,
-      })
+      .getAnalytics(
+        {
+          jurisdiction: jurisdiction === ALL ? undefined : jurisdiction,
+          entityStatus: entityStatus === ALL ? undefined : entityStatus,
+          parentEntityId: parentEntityId ?? undefined,
+        },
+        controller.signal,
+      )
       .then((res) => {
-        if (cancelled) return;
         setAnalytics(res);
         setError(null);
         // Sync the parent dropdown to the backend's default pick once, so the
@@ -73,12 +80,10 @@ export default function AnalyticsPage() {
         }
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         setError(err instanceof ApiError ? err.message : 'Failed to load analytics.');
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [jurisdiction, entityStatus, parentEntityId]);
 
   const complianceData = analytics?.complianceBreakdown ?? [];
@@ -190,24 +195,6 @@ export default function AnalyticsPage() {
           </ChartCard>
 
           <ChartCard
-            title="Entity status by region"
-            description="Entities with no Global Region are grouped under Unspecified."
-            isEmpty={regionGroups.length === 0}
-            emptyMessage={emptyMessageFor('No entities match the current filters.')}
-          >
-            <HorizontalBarChart groups={regionGroups} series={regionSeries} />
-          </ChartCard>
-
-          <ChartCard
-            title="Subsidiaries vs. FQs per top-level entity"
-            description="Full descendant set at any depth, deduplicated by entity."
-            isEmpty={topLevelGroups.length === 0}
-            emptyMessage={emptyMessageFor('No top-level entities match the current filters.')}
-          >
-            <HorizontalBarChart groups={topLevelGroups} series={topLevelSeries} />
-          </ChartCard>
-
-          <ChartCard
             title="Ownership by parent"
             description="Each child's total ownership across all of its parents, plus its own unallocated remainder."
             isEmpty={parents.length === 0}
@@ -239,6 +226,24 @@ export default function AnalyticsPage() {
                 </p>
               )}
             </div>
+          </ChartCard>
+
+          <ChartCard
+            title="Entity status by region"
+            description="Entities with no Global Region are grouped under Unspecified."
+            isEmpty={regionGroups.length === 0}
+            emptyMessage={emptyMessageFor('No entities match the current filters.')}
+          >
+            <HorizontalBarChart groups={regionGroups} series={regionSeries} />
+          </ChartCard>
+
+          <ChartCard
+            title="Subsidiaries vs. FQs per top-level entity"
+            description="Full descendant set at any depth, deduplicated by entity."
+            isEmpty={topLevelGroups.length === 0}
+            emptyMessage={emptyMessageFor('No top-level entities match the current filters.')}
+          >
+            <HorizontalBarChart groups={topLevelGroups} series={topLevelSeries} />
           </ChartCard>
         </div>
       )}

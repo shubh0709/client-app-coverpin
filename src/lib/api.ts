@@ -4,6 +4,7 @@ import type {
   ApiErrorBody,
   EntityListFilters,
   EntityListResponse,
+  JurisdictionsResponse,
   UploadFieldError,
   UploadFormInput,
   UploadSuccess,
@@ -44,7 +45,12 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, init);
-  } catch {
+  } catch (err) {
+    // A caller-initiated abort (a newer request superseded this one) isn't a
+    // real failure — let it propagate as-is so callers can tell the two
+    // apart (`err.name === 'AbortError'`) instead of surfacing "could not
+    // reach the API" for a request nobody's waiting on anymore.
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
     throw new ApiError(0, 'Could not reach the API. Is the backend running?');
   }
 
@@ -83,24 +89,34 @@ export const api = {
     });
   },
 
-  /** GET /api/entities — top-level entities with recursively nested children. */
-  listEntities: (filters: EntityListFilters = {}) =>
+  /** GET /api/entities — one page of top-level entities with recursively nested children.
+   * Pass `signal` so an in-flight request can be aborted if it's superseded
+   * (a filter/page change, or the component unmounting) before it resolves. */
+  listEntities: (filters: EntityListFilters = {}, signal?: AbortSignal) =>
     requestJson<EntityListResponse>(
       `/api/entities${buildQuery({
         search: filters.search,
         entityStatus: filters.entityStatus,
         complianceStatus: filters.complianceStatus,
         jurisdiction: filters.jurisdiction,
+        page: filters.page ? String(filters.page) : undefined,
+        pageSize: filters.pageSize ? String(filters.pageSize) : undefined,
       })}`,
+      { signal },
     ),
 
+  /** GET /api/entities/jurisdictions — distinct jurisdictions for filter dropdowns. */
+  getJurisdictions: (signal?: AbortSignal) =>
+    requestJson<JurisdictionsResponse>('/api/entities/jurisdictions', { signal }),
+
   /** GET /api/analytics — the four analytics-page charts. */
-  getAnalytics: (filters: AnalyticsFilters = {}) =>
+  getAnalytics: (filters: AnalyticsFilters = {}, signal?: AbortSignal) =>
     requestJson<AnalyticsResponse>(
       `/api/analytics${buildQuery({
         jurisdiction: filters.jurisdiction,
         entityStatus: filters.entityStatus,
         parentEntityId: filters.parentEntityId,
       })}`,
+      { signal },
     ),
 };

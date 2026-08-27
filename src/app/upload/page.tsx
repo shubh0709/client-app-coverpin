@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useState, type DragEvent, type FormEvent } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import {
@@ -9,12 +9,15 @@ import {
   ListIcon,
   Loader2Icon,
   TriangleAlertIcon,
+  UploadCloudIcon,
   UploadIcon,
+  XIcon,
 } from 'lucide-react';
 import { api, ApiError, UploadValidationError } from '@/lib/api';
 import {
   UPLOAD_FILE_NAMES,
   UPLOAD_SLOT_BY_FILE,
+  UPLOAD_SLOTS,
   uploadFormSchema,
   type UploadFieldError,
   type UploadSlot,
@@ -22,7 +25,7 @@ import {
 } from '@/lib/schemas';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 
 const SLOT_DESCRIPTIONS: Record<UploadSlot, string> = {
   entities: 'One row per Entity or FQ registration.',
@@ -32,17 +35,42 @@ const SLOT_DESCRIPTIONS: Record<UploadSlot, string> = {
 
 type Files = Partial<Record<UploadSlot, File>>;
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function UploadPage() {
   const [files, setFiles] = useState<Files>({});
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<UploadSlot, string>>>({});
+  // Bumped per-slot to force the underlying <input type="file"> to remount —
+  // that's the only way to clear its browser-displayed filename, since the
+  // DOM element ignores React state resets (it's uncontrolled).
+  const [inputKeys, setInputKeys] = useState<Record<UploadSlot, number>>({
+    entities: 0,
+    ownership: 0,
+    filings: 0,
+  });
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<UploadSuccess | null>(null);
   const [validationErrors, setValidationErrors] = useState<UploadFieldError[] | null>(null);
   const [genericError, setGenericError] = useState<string | null>(null);
 
+  const selectedCount = UPLOAD_SLOTS.filter((slot) => files[slot]).length;
+  const allSelected = selectedCount === UPLOAD_SLOTS.length;
+
   function onFileChange(slot: UploadSlot, file: File | null) {
     setFiles((prev) => ({ ...prev, [slot]: file ?? undefined }));
     setFieldErrors((prev) => ({ ...prev, [slot]: undefined }));
+    if (!file) {
+      setInputKeys((prev) => ({ ...prev, [slot]: prev[slot] + 1 }));
+    }
+    // A change to the file set starts a new attempt — the last attempt's
+    // result no longer describes what's in the form.
+    setSuccess(null);
+    setValidationErrors(null);
+    setGenericError(null);
   }
 
   async function onSubmit(e: FormEvent) {
@@ -67,6 +95,11 @@ export default function UploadPage() {
       const result = await api.upload(parsed.data);
       setSuccess(result);
       setFiles({});
+      setInputKeys((prev) => ({
+        entities: prev.entities + 1,
+        ownership: prev.ownership + 1,
+        filings: prev.filings + 1,
+      }));
       toast.success('Upload succeeded');
     } catch (err) {
       if (err instanceof UploadValidationError) {
@@ -98,38 +131,37 @@ export default function UploadPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Select files</CardTitle>
+          <div className="flex items-center justify-between gap-4">
+            <CardTitle>Select files</CardTitle>
+            <span className="text-xs font-medium tabular-nums text-muted-foreground">
+              {selectedCount} of {UPLOAD_SLOTS.length} selected
+            </span>
+          </div>
           <CardDescription>Each slot accepts a .csv or single-sheet .xlsx file.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} className="flex flex-col gap-5">
-            {(Object.keys(UPLOAD_FILE_NAMES) as UploadSlot[]).map((slot) => (
-              <div key={slot} className="flex flex-col gap-1.5">
-                <Label htmlFor={`file-${slot}`}>
-                  {UPLOAD_FILE_NAMES[slot]}
-                  <span className="font-normal text-muted-foreground"> — {SLOT_DESCRIPTIONS[slot]}</span>
-                </Label>
-                <div className="flex items-center gap-2">
-                  <FileSpreadsheetIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                  <input
-                    id={`file-${slot}`}
-                    type="file"
-                    accept=".csv,.xlsx"
-                    onChange={(e) => onFileChange(slot, e.target.files?.[0] ?? null)}
-                    className="w-full text-sm text-foreground file:mr-3 file:h-8 file:rounded-lg file:border file:border-input file:bg-background file:px-2.5 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
-                  />
-                </div>
-                {fieldErrors[slot] && (
-                  <p className="text-xs text-destructive">{fieldErrors[slot]}</p>
-                )}
-              </div>
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            {UPLOAD_SLOTS.map((slot) => (
+              <FileDropzone
+                key={slot}
+                slot={slot}
+                inputKey={inputKeys[slot]}
+                file={files[slot]}
+                error={fieldErrors[slot]}
+                onFileChange={(file) => onFileChange(slot, file)}
+              />
             ))}
 
-            <div>
-              <Button type="submit" disabled={submitting}>
+            <div className="flex items-center gap-3">
+              <Button type="submit" disabled={submitting || !allSelected}>
                 {submitting ? <Loader2Icon className="animate-spin" /> : <UploadIcon />}
                 {submitting ? 'Uploading…' : 'Upload'}
               </Button>
+              {!allSelected && (
+                <span className="text-xs text-muted-foreground">
+                  Select all {UPLOAD_SLOTS.length} files to continue.
+                </span>
+              )}
             </div>
           </form>
         </CardContent>
@@ -225,6 +257,97 @@ export default function UploadPage() {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function FileDropzone({
+  slot,
+  inputKey,
+  file,
+  error,
+  onFileChange,
+}: {
+  slot: UploadSlot;
+  inputKey: number;
+  file: File | undefined;
+  error: string | undefined;
+  onFileChange: (file: File | null) => void;
+}) {
+  const [dragActive, setDragActive] = useState(false);
+  const inputId = `file-${slot}`;
+
+  function handleDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragActive(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) onFileChange(dropped);
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-sm font-medium">{UPLOAD_FILE_NAMES[slot]}</span>
+        <span className="text-xs text-muted-foreground">{SLOT_DESCRIPTIONS[slot]}</span>
+      </div>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={handleDrop}
+        className={cn(
+          'flex items-center gap-3 rounded-lg border border-dashed px-3 py-2.5 transition-colors',
+          dragActive && 'border-primary bg-primary/5',
+          !dragActive && (error ? 'border-destructive/40 bg-destructive/5' : 'border-input'),
+          file && !error && 'border-solid bg-muted/30'
+        )}
+      >
+        {file ? (
+          <>
+            <CheckCircle2Icon
+              className="size-4 shrink-0 text-[var(--viz-status-good)]"
+              aria-hidden
+            />
+            <div className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span className="truncate text-sm">{file.name}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {formatFileSize(file.size)}
+              </span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Remove ${file.name}`}
+              onClick={() => onFileChange(null)}
+            >
+              <XIcon />
+            </Button>
+          </>
+        ) : (
+          <>
+            <UploadCloudIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="flex-1 text-sm text-muted-foreground">
+              Drag & drop, or{' '}
+              <label htmlFor={inputId} className="cursor-pointer font-medium text-foreground underline underline-offset-2">
+                browse
+              </label>
+            </span>
+            <FileSpreadsheetIcon className="size-4 shrink-0 text-muted-foreground/50" aria-hidden />
+          </>
+        )}
+        <input
+          key={inputKey}
+          id={inputId}
+          type="file"
+          accept=".csv,.xlsx"
+          onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
+          className="sr-only"
+        />
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

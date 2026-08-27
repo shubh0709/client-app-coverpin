@@ -78,6 +78,11 @@ export interface ChildEntity {
   subsidiaryCount: number;
   fqCount: number;
   children: ChildEntity[];
+  /** Whether this row's own entityName matched the active search term
+   * (false when no search is active). Used to auto-expand the path down to
+   * a matching descendant — the match itself is decided by the database,
+   * not by re-testing the string client-side. */
+  matchesSearch: boolean;
 }
 
 /** A top-level entity row: an `Entity`-type row with no incoming ownership edge. */
@@ -93,30 +98,31 @@ export interface TopLevelEntity {
   subsidiaryCount: number;
   fqCount: number;
   children: ChildEntity[];
+  matchesSearch: boolean;
 }
 
 export interface EntityListResponse {
   data: TopLevelEntity[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 }
 
-/** Walks a list-page tree at any depth, adding every jurisdiction seen —
- * used to build the jurisdiction filter's option list from an unfiltered
- * fetch, independent of how deep any given branch nests. */
-export function collectJurisdictions(
-  nodes: { jurisdiction: string; children: ChildEntity[] }[],
-  into: Set<string>,
-): void {
-  for (const node of nodes) {
-    into.add(node.jurisdiction);
-    collectJurisdictions(node.children, into);
-  }
-}
+export const PAGE_SIZES = [10, 25, 50, 100] as const;
+export type PageSize = (typeof PAGE_SIZES)[number];
 
 export interface EntityListFilters {
   search?: string;
   entityStatus?: EntityStatus;
   complianceStatus?: ComplianceStatus;
   jurisdiction?: string;
+  page?: number;
+  pageSize?: PageSize;
+}
+
+export interface JurisdictionsResponse {
+  jurisdictions: string[];
 }
 
 /** Analytics response shapes (GET /api/analytics). */
