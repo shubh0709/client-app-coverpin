@@ -61,7 +61,9 @@ export type ComplianceStatus = (typeof COMPLIANCE_STATUSES)[number];
 export const RELATIONS = ['fq', 'subsidiary'] as const;
 export type Relation = (typeof RELATIONS)[number];
 
-/** A direct child (FQ or subsidiary) of a top-level entity — one level deep only. */
+/** A child (FQ or subsidiary) at any depth under a top-level entity — a
+ * subsidiary can itself have subsidiaries and FQs, expanded recursively by
+ * expanding its own row in turn. FQs are terminal: `children` is always []. */
 export interface ChildEntity {
   id: string;
   entityName: string;
@@ -73,6 +75,9 @@ export interface ChildEntity {
   complianceStatus: ComplianceStatus;
   nextDueDate: string | null;
   ownershipPct: number | null;
+  subsidiaryCount: number;
+  fqCount: number;
+  children: ChildEntity[];
 }
 
 /** A top-level entity row: an `Entity`-type row with no incoming ownership edge. */
@@ -92,6 +97,19 @@ export interface TopLevelEntity {
 
 export interface EntityListResponse {
   data: TopLevelEntity[];
+}
+
+/** Walks a list-page tree at any depth, adding every jurisdiction seen —
+ * used to build the jurisdiction filter's option list from an unfiltered
+ * fetch, independent of how deep any given branch nests. */
+export function collectJurisdictions(
+  nodes: { jurisdiction: string; children: ChildEntity[] }[],
+  into: Set<string>,
+): void {
+  for (const node of nodes) {
+    into.add(node.jurisdiction);
+    collectJurisdictions(node.children, into);
+  }
 }
 
 export interface EntityListFilters {
@@ -124,16 +142,20 @@ export interface OwnershipParentOption {
   entityName: string;
 }
 
+/** pct is this child's total ownership allocated across ALL of its parents
+ * (not just the selected one); unallocatedPct is that child's own remainder
+ * (100 - pct). Each child gets its own two-segment bar — there's no shared
+ * "whole" across children to stack into a single bar. */
 export interface OwnershipChildShare {
   entityName: string;
   pct: number;
+  unallocatedPct: number;
 }
 
 export interface OwnershipByParent {
   parents: OwnershipParentOption[];
   selectedParentId: string | null;
   children: OwnershipChildShare[];
-  unallocatedPct: number;
 }
 
 export interface AnalyticsResponse {

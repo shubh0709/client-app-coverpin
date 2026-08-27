@@ -83,7 +83,7 @@ export const api = {
     });
   },
 
-  /** GET /api/entities — the list page's top-level + one-level-deep children. */
+  /** GET /api/entities — top-level entities with recursively nested children. */
   listEntities: (filters: EntityListFilters = {}) =>
     requestJson<EntityListResponse>(
       `/api/entities${buildQuery({

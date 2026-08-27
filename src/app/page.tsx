@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SearchIcon, UploadIcon, XIcon } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
-import { COMPLIANCE_STATUSES, ENTITY_STATUSES } from '@/lib/schemas';
+import { COMPLIANCE_STATUSES, collectJurisdictions, ENTITY_STATUSES } from '@/lib/schemas';
 import type { ComplianceStatus, EntityStatus, TopLevelEntity } from '@/lib/schemas';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -44,10 +44,7 @@ export default function ListPage() {
       .listEntities()
       .then((res) => {
         const set = new Set<string>();
-        for (const e of res.data) {
-          set.add(e.jurisdiction);
-          for (const c of e.children) set.add(c.jurisdiction);
-        }
+        collectJurisdictions(res.data, set);
         setJurisdictionOptions([...set].sort());
         setEverHadData(res.data.length > 0);
       })

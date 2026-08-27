@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
-import { ENTITY_STATUSES } from '@/lib/schemas';
+import { collectJurisdictions, ENTITY_STATUSES } from '@/lib/schemas';
 import type { AnalyticsResponse, EntityStatus } from '@/lib/schemas';
 import {
   ENTITY_STATUS_COLOR,
@@ -31,18 +31,20 @@ export default function AnalyticsPage() {
   const [jurisdictionOptions, setJurisdictionOptions] = useState<string[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hasAnyData, setHasAnyData] = useState<boolean | null>(null);
   const autoSelectedParent = useRef(false);
 
+  // An unfiltered fetch tells us whether "empty" means "nothing uploaded
+  // yet" or "the current filter excludes everything" — the two are required
+  // to be distinct, explicit empty states, never the same blank chart.
   useEffect(() => {
     api
       .listEntities()
       .then((res) => {
         const set = new Set<string>();
-        for (const e of res.data) {
-          set.add(e.jurisdiction);
-          for (const c of e.children) set.add(c.jurisdiction);
-        }
+        collectJurisdictions(res.data, set);
         setJurisdictionOptions([...set].sort());
+        setHasAnyData(res.data.length > 0);
       })
       .catch(() => {
         // Non-fatal — page filters just won't have jurisdiction options yet.
@@ -120,6 +122,10 @@ export default function AnalyticsPage() {
 
   const parents = analytics?.ownershipByParent.parents ?? [];
 
+  const noDataMessage = 'No data uploaded yet — upload entities, ownership, and filings to see this chart.';
+  const emptyMessageFor = (filteredMessage: string) =>
+    hasAnyData === false ? noDataMessage : filteredMessage;
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -178,7 +184,7 @@ export default function AnalyticsPage() {
             title="Compliance status breakdown"
             description="Every registration (top-level, FQ, and subsidiary), by compliance status."
             isEmpty={complianceTotal === 0}
-            emptyMessage="No entities match the current filters."
+            emptyMessage={emptyMessageFor('No entities match the current filters.')}
           >
             <ComplianceBreakdownChart data={complianceData} />
           </ChartCard>
@@ -187,25 +193,27 @@ export default function AnalyticsPage() {
             title="Entity status by region"
             description="Entities with no Global Region are grouped under Unspecified."
             isEmpty={regionGroups.length === 0}
-            emptyMessage="No entities match the current filters."
+            emptyMessage={emptyMessageFor('No entities match the current filters.')}
           >
             <HorizontalBarChart groups={regionGroups} series={regionSeries} />
           </ChartCard>
 
           <ChartCard
             title="Subsidiaries vs. FQs per top-level entity"
-            description="Direct children only — one level deep."
+            description="Full descendant set at any depth, deduplicated by entity."
             isEmpty={topLevelGroups.length === 0}
-            emptyMessage="No top-level entities match the current filters."
+            emptyMessage={emptyMessageFor('No top-level entities match the current filters.')}
           >
             <HorizontalBarChart groups={topLevelGroups} series={topLevelSeries} />
           </ChartCard>
 
           <ChartCard
             title="Ownership by parent"
-            description="Selected parent's direct children, plus any unallocated remainder."
+            description="Each child's total ownership across all of its parents, plus its own unallocated remainder."
             isEmpty={parents.length === 0}
-            emptyMessage="No entities with subsidiaries to show ownership for."
+            emptyMessage={emptyMessageFor(
+              'No entities match the current filters, or none of the matching entities own subsidiaries.',
+            )}
           >
             <div className="flex flex-col gap-4">
               <Select
@@ -224,10 +232,7 @@ export default function AnalyticsPage() {
                 </SelectContent>
               </Select>
               {parentEntityId ? (
-                <OwnershipBar
-                  shares={analytics.ownershipByParent.children}
-                  unallocatedPct={analytics.ownershipByParent.unallocatedPct}
-                />
+                <OwnershipBar shares={analytics.ownershipByParent.children} />
               ) : (
                 <p className="text-sm text-muted-foreground">
                   Select a parent above to see its ownership breakdown.

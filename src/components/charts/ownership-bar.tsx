@@ -1,73 +1,45 @@
 import { CATEGORICAL_SLOTS, UNALLOCATED_COLOR } from '@/lib/chart-colors';
-import { ChartLegend, type LegendEntry } from './legend';
 import type { OwnershipChildShare } from '@/lib/schemas';
 
-const MAX_DIRECT_CHILDREN = 7; // leave the 8th categorical slot for "Other"
-
 /**
- * Ownership % across a selected parent's children, rendered as a single
- * horizontal 100%-stacked bar (not a pie/donut — the dataviz skill's
- * part-to-whole guidance prefers a stacked bar, especially with long entity
- * names as segment labels). The unallocated remainder is always its own
- * segment, in the reserved neutral token, never hidden.
+ * One two-segment horizontal bar per selected parent's direct child: total
+ * ownership allocated to that child across ALL of its parents (not just the
+ * selected one) vs. that child's own unallocated remainder. Each child gets
+ * its own bar — every child's total is an independent number, so there's no
+ * shared "whole" to stack them into together.
  */
-export function OwnershipBar({
-  shares,
-  unallocatedPct,
-}: {
-  shares: OwnershipChildShare[];
-  unallocatedPct: number;
-}) {
-  const direct = shares.slice(0, MAX_DIRECT_CHILDREN);
-  const overflow = shares.slice(MAX_DIRECT_CHILDREN);
-  const overflowPct = overflow.reduce((sum, c) => sum + c.pct, 0);
-
-  const segments = [
-    ...direct.map((c, i) => ({
-      key: c.entityName,
-      label: c.entityName,
-      pct: c.pct,
-      color: CATEGORICAL_SLOTS[i],
-    })),
-    ...(overflow.length > 0
-      ? [
-          {
-            key: '__other__',
-            label: `Other (${overflow.length})`,
-            pct: overflowPct,
-            color: CATEGORICAL_SLOTS[7],
-          },
-        ]
-      : []),
-    {
-      key: '__unallocated__',
-      label: 'Unallocated',
-      pct: unallocatedPct,
-      color: UNALLOCATED_COLOR,
-    },
-  ].filter((s) => s.pct > 0);
-
-  const legend: LegendEntry[] = segments.map((s) => ({
-    key: s.key,
-    label: `${s.label} — ${formatPct(s.pct)}`,
-    color: s.color,
-  }));
+export function OwnershipBar({ shares }: { shares: OwnershipChildShare[] }) {
+  const sorted = [...shares].sort((a, b) => b.pct - a.pct);
 
   return (
-    <div>
-      <div className="flex h-7 w-full gap-0.5 overflow-hidden rounded-md">
-        {segments.map((s) => (
-          <div
-            key={s.key}
-            className="h-full first:rounded-l-md last:rounded-r-md"
-            style={{ width: `${s.pct}%`, backgroundColor: s.color }}
-            title={`${s.label}: ${formatPct(s.pct)}`}
-          />
-        ))}
-      </div>
-      <div className="mt-3">
-        <ChartLegend entries={legend} />
-      </div>
+    <div className="flex flex-col gap-4">
+      {sorted.map((share) => (
+        <div key={share.entityName} className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="font-medium">{share.entityName}</span>
+            <span className="shrink-0 text-muted-foreground">
+              {formatPct(share.pct)} allocated
+              {share.unallocatedPct > 0 && ` · ${formatPct(share.unallocatedPct)} unallocated`}
+            </span>
+          </div>
+          <div className="flex h-3 w-full gap-0.5 overflow-hidden rounded-md bg-muted">
+            {share.pct > 0 && (
+              <div
+                className="h-full first:rounded-l-md last:rounded-r-md"
+                style={{ width: `${share.pct}%`, backgroundColor: CATEGORICAL_SLOTS[0] }}
+                title={`Allocated: ${formatPct(share.pct)}`}
+              />
+            )}
+            {share.unallocatedPct > 0 && (
+              <div
+                className="h-full first:rounded-l-md last:rounded-r-md"
+                style={{ width: `${share.unallocatedPct}%`, backgroundColor: UNALLOCATED_COLOR }}
+                title={`Unallocated: ${formatPct(share.unallocatedPct)}`}
+              />
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
