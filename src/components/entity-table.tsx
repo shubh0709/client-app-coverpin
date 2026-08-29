@@ -29,10 +29,8 @@ function escapeRegExp(value: string): string {
 /** Wraps every case-insensitive occurrence of `term` inside `text` in a
  * <mark>. Only ever called for a node the backend already flagged as
  * `matchesSearch` — this re-finds *where* the match is for rendering, it
- * doesn't decide *whether* one exists (the backend already did, and may have
- * matched via a fuzzy/typo-tolerant comparison rather than a literal
- * substring — in that case there's nothing to highlight and the name just
- * renders plain). */
+ * doesn't decide *whether* one exists (the backend already did, via the same
+ * case-insensitive substring test). */
 function HighlightedName({ text, term }: { text: string; term: string }) {
   const trimmed = term.trim();
   if (!trimmed) return <>{text}</>;

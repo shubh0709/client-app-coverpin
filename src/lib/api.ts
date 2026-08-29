@@ -110,8 +110,8 @@ export const api = {
   getJurisdictions: (signal?: AbortSignal) =>
     requestJson<JurisdictionsResponse>('/api/entities/jurisdictions', { signal }),
 
-  /** GET /api/entities/suggestions — typo-tolerant Entity Name suggestions
-   * for the search bar's autocomplete dropdown, closest match first. */
+  /** GET /api/entities/suggestions — Entity Name suggestions for the search
+   * bar's autocomplete dropdown, closest match first. */
   getSuggestions: (q: string, signal?: AbortSignal) =>
     requestJson<SuggestionsResponse>(
       `/api/entities/suggestions${buildQuery({ q })}`,
